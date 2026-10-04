@@ -1,0 +1,7 @@
+{
+  "name": "surveyra",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": { "start": "node --no-warnings server.js", "test": "node --no-warnings test.js" },
+  "engines": { "node": ">=22.5" }
+}

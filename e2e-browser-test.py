@@ -1,0 +1,43 @@
+import subprocess, tempfile, time, os
+from playwright.sync_api import sync_playwright
+env=dict(os.environ, PORT="3111", DATA_DIR=tempfile.mkdtemp(), ADMIN_KEY="k", SURVEY_SEC_FLOOR="2", SURVEY_SEC_PER_Q="1")
+srv=subprocess.Popen(["node","--no-warnings","server.js"],env=env); time.sleep(1.5)
+ok=[]; 
+def t(n,c): ok.append(c); print(("PASS " if c else "FAIL ")+n)
+try:
+  with sync_playwright() as p:
+    b=p.chromium.launch(); pg=b.new_page(viewport={"width":1200,"height":800}); errs=[]; bad=[]; pg.on("response",lambda r: bad.append((r.status,r.url)) if r.status in (403,) else None)
+    pg.on("pageerror",lambda e:errs.append(str(e))); pg.on("console",lambda m: errs.append(m.text) if m.type=="error" else None)
+    pg.goto("http://localhost:3111/"); 
+    t("landing renders", pg.locator("text=Get paid for what you already think").count()==1)
+    pg.click("text=Join free"); pg.fill("#an","Rina Akter"); pg.fill("#ae","rina@example.com"); pg.fill("#ap","secret12")
+    pg.click("[data-a=doauth]"); pg.wait_for_selector(".bal")
+    t("signup -> dashboard with 50 coins", "50" in pg.inner_text(".bal"))
+    pg.click("nav, .side >> text=Surveys"); pg.wait_for_selector("text=Everyday Shopping Habits")
+    pg.locator("[data-a=start]").first.click(); pg.wait_for_selector("text=Question 1 of 3")
+    for i in range(3):
+        pg.locator(".opt").first.click(); pg.click("[data-a=next]")
+        if i<2: pg.wait_for_selector(f"text=Question {i+2} of 3")
+    pg.wait_for_selector(".err:has-text('too fast')")
+    t("speeding is rejected with message", True)
+    time.sleep(3); pg.click("[data-a=next]"); pg.wait_for_selector(".done")
+    t("survey success shows +60 coins", "+60" in pg.inner_text(".done"))
+    pg.click(".done >> text=Back to surveys")
+    t("survey marked completed", pg.locator("button:has-text('Completed')").count()==1)
+    pg.click(".side >> text=Home"); pg.click("[data-a=bonus]"); pg.wait_for_selector("text=Come back tomorrow")
+    t("daily bonus claimed", True)
+    t("balance 130 on dashboard", "130" in pg.inner_text(".bal"))
+    pg.click(".side >> text=Withdraw"); pg.fill("#wa","500"); pg.fill("#wd","01700000000"); pg.click("[data-a=wd]"); pg.wait_for_function("document.querySelector('#we').textContent.length>0")
+    t("insufficient coins error shown", "enough coins" in pg.inner_text("#we"))
+    pg.click(".side >> text=Ranks"); pg.wait_for_selector("h2:has-text('Leaderboard')"); t("leaderboard lists user", pg.locator("td:has-text('Rina A')").count()==1)
+    pg.click(".side >> text=Account"); pg.wait_for_selector("h2:has-text('Account')"); t("activity shows survey", pg.locator("td:has-text('Survey: Everyday')").count()==1)
+    pg.click(".side >> text=Log out"); pg.wait_for_selector("text=Join free")
+    pg.click("text=Log in"); pg.fill("#ae","rina@example.com"); pg.fill("#ap","secret12"); pg.click("[data-a=doauth]"); pg.wait_for_selector(".bal")
+    t("login works, balance kept", "130" in pg.inner_text(".bal"))
+    pg.screenshot(path="/tmp/dash.png")
+    pg.set_viewport_size({"width":390,"height":800}); pg.reload(); pg.wait_for_selector(".bal")
+    t("mobile no horizontal scroll", pg.evaluate("document.documentElement.scrollWidth<=window.innerWidth+1"))
+    t("no unexpected errors", not [e for e in errs if "401" not in e]); print([e for e in errs if "401" not in e]); print("403s:",bad)
+    b.close()
+finally: srv.terminate()
+print("ALL OK" if all(ok) else "SOME FAILED")
